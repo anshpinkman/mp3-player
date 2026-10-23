@@ -1,189 +1,60 @@
-const $ = s => document.querySelector(s);
-const audio = $('#audio');
-let tracks = [], cur = -1, shuffle = false, repeat = 0; // repeat: 0 off, 1 all, 2 one
-let favourites = new Set(JSON.parse(localStorage.getItem('mp3-favourites') || '[]'));
-let playlists = JSON.parse(localStorage.getItem('mp3-playlists') || '{"All songs":[]}');
-let activePlaylist = 'All songs', onlyFavourites = false;
 
-const fmt = s => { s = Math.floor(s || 0); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
-const enc = encodeURIComponent;
-const esc = t => t.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const note = '<svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>';
-const fill = (el, v) => el.style.setProperty('--p', v + '%');
-
-async function load() {
-  const status = $('#status');
-  try {
-    const response = await fetch('/api/tracks');
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Could not load songs');
-    tracks = data; render(); status.hidden = true;
-  } catch (e) { status.textContent = 'Library error: ' + e.message; status.hidden = false; }
-  updatePlaylistOptions();
-}
-function saveLibrary() {
-  localStorage.setItem('mp3-favourites', JSON.stringify([...favourites]));
-  localStorage.setItem('mp3-playlists', JSON.stringify(playlists));
-}
-function updatePlaylistOptions() {
-  const select = $('#playlistSelect'); if (!select) return;
-  select.innerHTML = '';
-  Object.keys(playlists).forEach(name => { const o=document.createElement('option'); o.value=name; o.textContent=name; select.appendChild(o); });
-  if (!playlists[activePlaylist]) activePlaylist='All songs';
-  select.value=activePlaylist;
-}
-
-
-function render() {
-  const q = $('#q').value.trim().toLowerCase();
-  const ul = $('#tracks'); ul.innerHTML = '';
-  tracks.forEach((t, i) => {
-    if (q && !(t.title + ' ' + t.artist + ' ' + t.album).toLowerCase().includes(q)) return;
-    if (onlyFavourites && !favourites.has(t.file)) return;
-    if (activePlaylist !== 'All songs' && !(playlists[activePlaylist] || []).includes(t.file)) return;
-    const li = document.createElement('li');
-    if (i === cur) li.className = 'active';
-    li.innerHTML = `<div class="th">${t.cover ? `<img loading="lazy" src="/cover/${enc(t.file)}" alt="">` : note}</div>
-      <div class="tracktext"><b>${esc(t.title)}</b><small>${esc(t.artist)}${t.album ? ' · '+esc(t.album) : ''}</small></div><time>${fmt(t.duration)}</time><button class="fav" title="Toggle favourite" aria-label="Toggle favourite" style="color:${favourites.has(t.file)?'#fff':'#777'};font-size:20px;padding:8px">${favourites.has(t.file)?'♥':'♡'}</button>`;
-    li.onclick = () => play(i);
-    li.querySelector('.fav').onclick = e => { e.stopPropagation(); favourites.has(t.file) ? favourites.delete(t.file) : favourites.add(t.file); saveLibrary(); render(); };
-    ul.appendChild(li);
-  });
-  $('#empty').hidden = ul.children.length > 0;
-  if (!ul.children.length) { $('#empty').textContent = tracks.length ? 'No songs match this filter.' : 'No songs yet. Upload MP3 files with +'; }
-}
-
-function play(i) {
-  if (!tracks.length) return;
-  cur = (i + tracks.length) % tracks.length;
-  const t = tracks[cur];
-  audio.src = '/audio/' + enc(t.file);
-  audio.play().catch(() => {});
-  $('#title').textContent = t.title;
-  $('#artist').textContent = t.artist;
-  $('#album').textContent = t.album;
-  document.title = `${t.title} · ${t.artist}`;
-  const img = $('#coverImg'), ph = document.querySelector('.cover .ph');
-  if (t.cover) { img.src = '/cover/' + enc(t.file); img.hidden = false; ph.hidden = true; $('#glow').style.backgroundImage = `url(/cover/${enc(t.file)})`; }
-  else { img.hidden = true; ph.hidden = false; $('#glow').style.backgroundImage = 'none'; }
-  if ('mediaSession' in navigator) {
-    navigator.mediaSession.metadata = new MediaMetadata({
-      title: t.title, artist: t.artist, album: t.album,
-      artwork: t.cover ? [{ src: '/cover/' + enc(t.file) }] : []
-    });
-  }
-  render();
-  document.querySelector('#tracks li.active')?.scrollIntoView({ block: 'nearest' });
-}
-
-function next(auto) {
-  if (!tracks.length) return;
-  if (auto && repeat === 2) return play(cur);
-  if (shuffle && tracks.length > 1) {
-    let n; do { n = Math.floor(Math.random() * tracks.length); } while (n === cur);
-    return play(n);
-  }
-  if (auto && repeat === 0 && cur === tracks.length - 1) return;
-  play(cur + 1);
-}
-function prev() {
-  if (audio.currentTime > 3) audio.currentTime = 0; else play(cur - 1);
-}
-function toggle() {
-  if (cur < 0) return play(0);
-  audio.paused ? audio.play() : audio.pause();
-}
-
-// audio events
-audio.addEventListener('play', () => sync(true));
-audio.addEventListener('pause', () => sync(false));
-audio.addEventListener('ended', () => next(true));
-audio.addEventListener('loadedmetadata', () => $('#dur').textContent = fmt(audio.duration));
-audio.addEventListener('timeupdate', () => {
-  if (!audio.duration) return;
-  const p = audio.currentTime / audio.duration * 1000;
-  if (!seeking) { $('#seek').value = p; fill($('#seek'), p / 10); }
-  $('#cur').textContent = fmt(audio.currentTime);
-});
-function sync(playing) {
-  $('#iPlay').hidden = playing; $('#iPause').hidden = !playing;
-  $('#play').setAttribute('aria-label', playing ? 'Pause' : 'Play');
-  $('#cover').classList.toggle('playing', playing);
-}
-
-// seek
-let seeking = false;
-const seek = $('#seek');
-seek.addEventListener('input', () => { seeking = true; fill(seek, seek.value / 10); $('#cur').textContent = fmt(seek.value / 1000 * audio.duration); });
-seek.addEventListener('change', () => { if (audio.duration) audio.currentTime = seek.value / 1000 * audio.duration; seeking = false; });
-
-// volume
-const vol = $('#vol');
-function setVol(v) {
-  v = Math.max(0, Math.min(100, v));
-  vol.value = v; audio.volume = v / 100; fill(vol, v);
-  try { localStorage.setItem('vol', v); } catch (e) {}
-}
-vol.addEventListener('input', () => setVol(+vol.value));
-let lastVol = 80;
-$('#mute').onclick = () => { if (audio.volume > 0) { lastVol = +vol.value; setVol(0); } else setVol(lastVol || 80); };
-try { setVol(+(localStorage.getItem('vol') ?? 80)); } catch (e) { setVol(80); }
-
-// buttons
-$('#play').onclick = toggle;
-$('#next').onclick = () => next(false);
-$('#prev').onclick = prev;
-$('#shuffle').onclick = () => { shuffle = !shuffle; $('#shuffle').classList.toggle('on', shuffle); };
-$('#repeat').onclick = () => {
-  repeat = (repeat + 1) % 3;
-  $('#repeat').classList.toggle('on', repeat > 0);
-  $('#rep1').hidden = repeat !== 2;
-};
-$('#q').addEventListener('input', render);
-$('#playlistSelect').addEventListener('change', e => { activePlaylist=e.target.value; onlyFavourites=false; $('#showFavs').classList.remove('on'); render(); });
-$('#newPlaylist').addEventListener('click', () => { const name=prompt('Playlist name?'); if(!name || !name.trim()) return; const n=name.trim().slice(0,40); if(playlists[n]) { alert('That playlist already exists.'); return; } playlists[n]=[]; activePlaylist=n; onlyFavourites=false; saveLibrary(); updatePlaylistOptions(); render(); });
-$('#showFavs').addEventListener('click', () => { onlyFavourites=!onlyFavourites; activePlaylist='All songs'; updatePlaylistOptions(); $('#showFavs').classList.toggle('on',onlyFavourites); render(); });
-// Add the currently playing song to the selected playlist with Shift+click on its row.
-$('#tracks').addEventListener('click', e => { if(!e.shiftKey || cur < 0 || activePlaylist==='All songs') return; const file=tracks[cur]?.file; if(file && !playlists[activePlaylist].includes(file)) { playlists[activePlaylist].push(file); saveLibrary(); render(); } });
-
-// keyboard
-document.addEventListener('keydown', e => {
-  if (e.target.matches('input[type=search]')) return;
-  const k = e.key.toLowerCase();
-  if (e.key === ' ') { e.preventDefault(); toggle(); }
-  else if (e.key === 'ArrowRight') e.shiftKey ? next(false) : audio.currentTime += 5;
-  else if (e.key === 'ArrowLeft') e.shiftKey ? prev() : audio.currentTime -= 5;
-  else if (e.key === 'ArrowUp') { e.preventDefault(); setVol(+vol.value + 5); }
-  else if (e.key === 'ArrowDown') { e.preventDefault(); setVol(+vol.value - 5); }
-  else if (k === 'm') $('#mute').click();
-  else if (k === 's') $('#shuffle').click();
-  else if (k === 'r') $('#repeat').click();
-});
-
-// media keys / lock screen
-if ('mediaSession' in navigator) {
-  navigator.mediaSession.setActionHandler('play', toggle);
-  navigator.mediaSession.setActionHandler('pause', toggle);
-  navigator.mediaSession.setActionHandler('nexttrack', () => next(false));
-  navigator.mediaSession.setActionHandler('previoustrack', prev);
-}
-
-// upload (button + drag and drop)
 async function upload(files) {
-  const fd = new FormData();
-  [...files].filter(f => f.name.toLowerCase().endsWith('.mp3')).forEach(f => fd.append('files', f));
-  if (![...fd.keys()].length) return;
-  const playing = cur >= 0 ? tracks[cur].file : null;
-  const status = $('#status'); status.hidden = false; status.textContent = 'Uploading MP3 files…';
-  try { const res = await fetch('/api/upload', { method: 'POST', body: fd }); const result = await res.json(); if (!res.ok) throw new Error(result.error || 'Upload failed'); await load(); status.hidden = false; status.textContent = `Uploaded ${result.saved || 0} song(s).` + (result.errors?.length ? ' Errors: ' + result.errors.join('; ') : ''); } catch(e) { status.hidden = false; status.textContent = 'Upload failed: ' + e.message; return; }
-  if (playing) cur = tracks.findIndex(t => t.file === playing);
-  render();
-}
-$('#file').addEventListener('change', e => { upload(e.target.files); e.target.value = ''; });
-let depth = 0;
-addEventListener('dragenter', e => { e.preventDefault(); depth++; $('#drop').classList.add('show'); });
-addEventListener('dragleave', () => { if (--depth <= 0) { depth = 0; $('#drop').classList.remove('show'); } });
-addEventListener('dragover', e => e.preventDefault());
-addEventListener('drop', e => { e.preventDefault(); depth = 0; $('#drop').classList.remove('show'); upload(e.dataTransfer.files); });
+  const selected = [...files].filter(f =>
+    f.name.toLowerCase().endsWith('.mp3')
+  );
 
-load();
+  if (!selected.length) {
+    alert('Please select MP3 files.');
+    return;
+  }
+
+  const playing = cur >= 0 ? tracks[cur]?.file : null;
+  const status = $('#status');
+  status.hidden = false;
+  status.textContent = `Uploading ${selected.length} MP3 file(s)…`;
+
+  try {
+    const fd = new FormData();
+    selected.forEach(file => fd.append('files', file));
+
+    const res = await fetch('/api/upload', {
+      method: 'POST',
+      body: fd
+    });
+
+    const text = await res.text();
+    let result;
+
+    try {
+      result = JSON.parse(text);
+    } catch {
+      throw new Error(
+        `Server returned HTML instead of JSON (HTTP ${res.status}). ` +
+        `Files may be too large or the server may have failed.`
+      );
+    }
+
+    if (!res.ok && res.status !== 207) {
+      throw new Error(result.error || `Upload failed (HTTP ${res.status})`);
+    }
+
+    await load();
+
+    if (playing) {
+      cur = tracks.findIndex(t => t.file === playing);
+    }
+
+    render();
+
+    status.hidden = false;
+    status.textContent =
+      `Uploaded ${result.saved || 0} of ${selected.length} song(s).` +
+      (result.errors?.length
+        ? ' Errors: ' + result.errors.join('; ')
+        : '');
+  } catch (e) {
+    status.hidden = false;
+    status.textContent = 'Upload failed: ' + e.message;
+  }
+}
