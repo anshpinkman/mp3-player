@@ -59,13 +59,17 @@
 
   <section class="list">
     <div class="bar">
-      <input type="search" id="q" placeholder="Search songs or artists">
+      <input type="search" id="q" placeholder="Search songs, artists or albums">
+      <select id="playlistSelect" aria-label="Playlist" style="max-width:145px;background:#111;color:#eee;border:1px solid #292929;border-radius:10px;padding:10px"></select>
+      <button id="newPlaylist" class="add" type="button" title="Create playlist" aria-label="Create playlist" style="font-size:22px">☷</button>
+      <button id="showFavs" class="add" type="button" title="Show favourites" aria-label="Show favourites" style="font-size:18px">♡</button>
       <label class="add" title="Add MP3 files">
         <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
         <input type="file" id="file" accept=".mp3,audio/mpeg" multiple hidden>
       </label>
     </div>
     <ul id="tracks"></ul>
+    <p id="status" class="empty" role="status" aria-live="polite" hidden></p>
     <p class="empty" id="empty" hidden>No songs yet. Drop MP3 files here or press +</p>
   </section>
 </main>

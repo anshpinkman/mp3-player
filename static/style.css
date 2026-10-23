@@ -77,3 +77,12 @@ input[type=range]:hover::-webkit-slider-thumb,input[type=range]:focus-visible::-
   .list{height:420px}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+/* Library additions */
+.bar{gap:8px}
+.bar input[type=search]{min-width:0;flex:1}
+.bar .add{flex:0 0 44px}
+#playlistSelect{min-width:0;width:145px;font:inherit;font-size:12px}
+#tracks li{cursor:pointer}
+#tracks li:hover{background:#141414}
+#status{padding:12px 18px;color:var(--dim);font-size:13px}
+@media(max-width:800px){body{overflow:auto}.app{height:auto;min-height:100%;grid-template-columns:minmax(0,1fr);gap:24px;padding:18px}.player{max-width:520px;width:100%;margin:auto}.list{height:55vh;min-height:320px}.bar{flex-wrap:wrap}.bar input[type=search]{flex-basis:100%}#playlistSelect{flex:1}}

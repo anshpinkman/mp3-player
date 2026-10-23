@@ -1,6 +1,9 @@
 const $ = s => document.querySelector(s);
 const audio = $('#audio');
 let tracks = [], cur = -1, shuffle = false, repeat = 0; // repeat: 0 off, 1 all, 2 one
+let favourites = new Set(JSON.parse(localStorage.getItem('mp3-favourites') || '[]'));
+let playlists = JSON.parse(localStorage.getItem('mp3-playlists') || '{"All songs":[]}');
+let activePlaylist = 'All songs', onlyFavourites = false;
 
 const fmt = s => { s = Math.floor(s || 0); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 const enc = encodeURIComponent;
@@ -9,23 +12,45 @@ const note = '<svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6"
 const fill = (el, v) => el.style.setProperty('--p', v + '%');
 
 async function load() {
-  tracks = await (await fetch('/api/tracks')).json();
-  render();
+  const status = $('#status');
+  try {
+    const response = await fetch('/api/tracks');
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Could not load songs');
+    tracks = data; render(); status.hidden = true;
+  } catch (e) { status.textContent = 'Library error: ' + e.message; status.hidden = false; }
+  updatePlaylistOptions();
 }
+function saveLibrary() {
+  localStorage.setItem('mp3-favourites', JSON.stringify([...favourites]));
+  localStorage.setItem('mp3-playlists', JSON.stringify(playlists));
+}
+function updatePlaylistOptions() {
+  const select = $('#playlistSelect'); if (!select) return;
+  select.innerHTML = '';
+  Object.keys(playlists).forEach(name => { const o=document.createElement('option'); o.value=name; o.textContent=name; select.appendChild(o); });
+  if (!playlists[activePlaylist]) activePlaylist='All songs';
+  select.value=activePlaylist;
+}
+
 
 function render() {
   const q = $('#q').value.trim().toLowerCase();
   const ul = $('#tracks'); ul.innerHTML = '';
   tracks.forEach((t, i) => {
     if (q && !(t.title + ' ' + t.artist + ' ' + t.album).toLowerCase().includes(q)) return;
+    if (onlyFavourites && !favourites.has(t.file)) return;
+    if (activePlaylist !== 'All songs' && !(playlists[activePlaylist] || []).includes(t.file)) return;
     const li = document.createElement('li');
     if (i === cur) li.className = 'active';
     li.innerHTML = `<div class="th">${t.cover ? `<img loading="lazy" src="/cover/${enc(t.file)}" alt="">` : note}</div>
-      <div><b>${esc(t.title)}</b><small>${esc(t.artist)}</small></div><time>${fmt(t.duration)}</time>`;
+      <div class="tracktext"><b>${esc(t.title)}</b><small>${esc(t.artist)}${t.album ? ' · '+esc(t.album) : ''}</small></div><time>${fmt(t.duration)}</time><button class="fav" title="Toggle favourite" aria-label="Toggle favourite" style="color:${favourites.has(t.file)?'#fff':'#777'};font-size:20px;padding:8px">${favourites.has(t.file)?'♥':'♡'}</button>`;
     li.onclick = () => play(i);
+    li.querySelector('.fav').onclick = e => { e.stopPropagation(); favourites.has(t.file) ? favourites.delete(t.file) : favourites.add(t.file); saveLibrary(); render(); };
     ul.appendChild(li);
   });
-  $('#empty').hidden = tracks.length > 0;
+  $('#empty').hidden = ul.children.length > 0;
+  if (!ul.children.length) { $('#empty').textContent = tracks.length ? 'No songs match this filter.' : 'No songs yet. Upload MP3 files with +'; }
 }
 
 function play(i) {
@@ -115,6 +140,11 @@ $('#repeat').onclick = () => {
   $('#rep1').hidden = repeat !== 2;
 };
 $('#q').addEventListener('input', render);
+$('#playlistSelect').addEventListener('change', e => { activePlaylist=e.target.value; onlyFavourites=false; $('#showFavs').classList.remove('on'); render(); });
+$('#newPlaylist').addEventListener('click', () => { const name=prompt('Playlist name?'); if(!name || !name.trim()) return; const n=name.trim().slice(0,40); if(playlists[n]) { alert('That playlist already exists.'); return; } playlists[n]=[]; activePlaylist=n; onlyFavourites=false; saveLibrary(); updatePlaylistOptions(); render(); });
+$('#showFavs').addEventListener('click', () => { onlyFavourites=!onlyFavourites; activePlaylist='All songs'; updatePlaylistOptions(); $('#showFavs').classList.toggle('on',onlyFavourites); render(); });
+// Add the currently playing song to the selected playlist with Shift+click on its row.
+$('#tracks').addEventListener('click', e => { if(!e.shiftKey || cur < 0 || activePlaylist==='All songs') return; const file=tracks[cur]?.file; if(file && !playlists[activePlaylist].includes(file)) { playlists[activePlaylist].push(file); saveLibrary(); render(); } });
 
 // keyboard
 document.addEventListener('keydown', e => {
@@ -144,8 +174,8 @@ async function upload(files) {
   [...files].filter(f => f.name.toLowerCase().endsWith('.mp3')).forEach(f => fd.append('files', f));
   if (![...fd.keys()].length) return;
   const playing = cur >= 0 ? tracks[cur].file : null;
-  await fetch('/api/upload', { method: 'POST', body: fd });
-  await load();
+  const status = $('#status'); status.hidden = false; status.textContent = 'Uploading MP3 files…';
+  try { const res = await fetch('/api/upload', { method: 'POST', body: fd }); const result = await res.json(); if (!res.ok) throw new Error(result.error || 'Upload failed'); await load(); status.hidden = false; status.textContent = `Uploaded ${result.saved || 0} song(s).` + (result.errors?.length ? ' Errors: ' + result.errors.join('; ') : ''); } catch(e) { status.hidden = false; status.textContent = 'Upload failed: ' + e.message; return; }
   if (playing) cur = tracks.findIndex(t => t.file === playing);
   render();
 }
